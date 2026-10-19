@@ -1,0 +1,152 @@
+# api-gateway: single entry point of the application, on port 3000.
+#
+#   /api/movies*       -> proxied over HTTP to inventory-app:8080
+#   POST /api/billing  -> published into the RabbitMQ "billing_queue"
+#
+# Stateless, so it runs as a Deployment scaled by a HorizontalPodAutoscaler
+# between 1 and 3 replicas on CPU usage. It never talks to billing-app
+# directly: billing orders are accepted even while billing-app is stopped.
+
+# LoadBalancer Service: K3s ServiceLB opens port 3000 on every node, so the
+# gateway answers on http://192.168.56.110:3000 and http://192.168.56.111:3000,
+# and balances the requests across the gateway replicas.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  labels:
+    app: api-gateway
+    app.kubernetes.io/part-of: orchestrator
+spec:
+  type: LoadBalancer
+  selector:
+    app: api-gateway
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  labels:
+    app: api-gateway
+    app.kubernetes.io/part-of: orchestrator
+spec:
+  # No "replicas" field: the HorizontalPodAutoscaler below owns the replica
+  # count, and re-applying this file must not reset it.
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        app.kubernetes.io/part-of: orchestrator
+    spec:
+      # None of the containers calls the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      # Spread the replicas over both nodes when possible.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api-gateway
+      containers:
+        - name: api-gateway
+          image: clecart/api-gateway:1.0.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: INVENTORY_APP_URL
+              value: http://inventory-app:8080
+            - name: RABBITMQ_HOST
+              value: rabbitmq
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_QUEUE
+              value: billing_queue
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: password
+            - name: LOG_DIR
+              value: /var/logs/api-gateway
+          # TCP checks only: /health reports RabbitMQ, and an unreachable broker
+          # must not take /api/movies down with it (billing answers 503 instead).
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          # The CPU request is the reference of the autoscaler's percentage.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+              ephemeral-storage: 32Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # access.log and gateway.log (also written to stdout, i.e. kubectl logs).
+            - name: logs
+              mountPath: /var/logs/api-gateway
+      volumes:
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  labels:
+    app: api-gateway
+    app.kubernetes.io/part-of: orchestrator
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    # Scale out when the average CPU usage exceeds 60 % of the request (100m).
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    # Scale back in after 1 minute of low load instead of the default 5.
+    scaleDown:
+      stabilizationWindowSeconds: 60

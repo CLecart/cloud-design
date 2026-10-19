@@ -1,0 +1,143 @@
+# inventory-db: PostgreSQL 17 server holding the "movies" database of inventory-app.
+#
+# StatefulSet (and not Deployment): the pod keeps a stable name (inventory-db-0)
+# and its own persistent volume, which follows it wherever it is rescheduled.
+# Reachable inside the cluster at inventory-db:5432.
+
+# Headless Service (clusterIP: None): the DNS name resolves straight to the pod
+# IP. It is also the "governing" Service the StatefulSet requires.
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-db
+  labels:
+    app: inventory-db
+    app.kubernetes.io/part-of: orchestrator
+spec:
+  clusterIP: None
+  selector:
+    app: inventory-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: inventory-db
+  labels:
+    app: inventory-db
+    app.kubernetes.io/part-of: orchestrator
+spec:
+  serviceName: inventory-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-db
+  template:
+    metadata:
+      labels:
+        app: inventory-db
+        app.kubernetes.io/part-of: orchestrator
+    spec:
+      # None of the containers calls the Kubernetes API.
+      automountServiceAccountToken: false
+      # The image runs as "postgres" (uid 70). The numeric ids let Kubernetes
+      # enforce runAsNonRoot and match the owner of the NFS directory.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: inventory-db
+          image: clecart/inventory-database:1.0.0
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: movies
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-secret
+                  key: password
+            # Defaults of psql, so `kubectl exec -it inventory-db-0 -- psql`
+            # opens the database without any option.
+            - name: PGUSER
+              value: $(POSTGRES_USER)
+            - name: PGDATABASE
+              value: $(POSTGRES_DB)
+          # The first start initialises the cluster before the server listens on
+          # TCP: the startup probe gives it up to 150 s.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # Writable scratch space the read-only root filesystem lacks:
+            # unix socket and lock file, temporary files.
+            - name: run
+              mountPath: /run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  # One claim per replica (data-inventory-db-0), bound to the inventory-db-pv
+  # PersistentVolume of Manifests/storage.yaml through its "app" label.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: inventory-db
+          app.kubernetes.io/part-of: orchestrator
+      spec:
+        storageClassName: nfs
+        accessModes:
+          - ReadWriteOnce
+        selector:
+          matchLabels:
+            app: inventory-db
+        resources:
+          requests:
+            storage: 1Gi
