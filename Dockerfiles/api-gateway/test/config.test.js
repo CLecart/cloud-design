@@ -38,6 +38,13 @@ test('reads overrides and normalises the inventory URL', () => {
   assert.deepEqual(config.rabbitmq, { host: 'mq', port: 5673, user: 'rabbit_user', password: 's3cret', queue: 'orders' });
 });
 
+test('strips every trailing slash of the inventory URL', () => {
+  const inventoryUrl = (url) => loadConfig({ ...secrets, INVENTORY_APP_URL: url }).inventoryUrl;
+  assert.equal(inventoryUrl('http://localhost:9090///'), 'http://localhost:9090');
+  assert.equal(inventoryUrl('http://inventory-app:8080/api/'), 'http://inventory-app:8080/api');
+  assert.equal(inventoryUrl(`http://a/${'/'.repeat(100000)}x`), `http://a/${'/'.repeat(100000)}x`);
+});
+
 test('fails fast when a secret is missing or empty', () => {
   throwsConfigError({}, /Missing required environment variable\(s\): RABBITMQ_USER, RABBITMQ_PASSWORD/);
   throwsConfigError({ ...secrets, RABBITMQ_PASSWORD: '' }, /RABBITMQ_PASSWORD/);

@@ -29,7 +29,10 @@ function parseHttpUrl(name, value) {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new ConfigError(`${name} must use http or https (got "${value}")`);
   }
-  return value.replace(/\/+$/, '');
+  // A loop rather than /\/+$/, which backtracks quadratically on a long run of slashes.
+  let end = value.length;
+  while (value[end - 1] === '/') end -= 1;
+  return value.slice(0, end);
 }
 
 /** Reads and validates the environment; throws ConfigError on any problem. */
