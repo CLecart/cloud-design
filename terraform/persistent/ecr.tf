@@ -9,14 +9,24 @@ resource "aws_ecr_repository" "this" {
   # `terraform destroy` also removes the repositories that still hold images.
   force_delete = true
 
-  # Basic scanning (vulnerabilities of the OS packages) at every push. Enhanced
-  # scanning relies on Amazon Inspector, which the Free plan does not include.
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
   encryption_configuration {
     encryption_type = "AES256"
+  }
+}
+
+# Basic scanning (vulnerabilities of the OS packages) at every push of a project
+# image. Scan on push is a registry-level filter: without a matching rule ECR
+# leaves the repositories in manual scanning, whatever their own scanOnPush flag.
+# Enhanced scanning relies on Amazon Inspector, which the Free plan does not include.
+resource "aws_ecr_registry_scanning_configuration" "this" {
+  scan_type = "BASIC"
+
+  rule {
+    scan_frequency = "SCAN_ON_PUSH"
+    repository_filter {
+      filter      = "${var.project}/*"
+      filter_type = "WILDCARD"
+    }
   }
 }
 
