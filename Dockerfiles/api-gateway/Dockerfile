@@ -11,9 +11,12 @@ LABEL org.opencontainers.image.title="api-gateway-app" \
       org.opencontainers.image.description="API gateway: proxies /api/movies to inventory-app and publishes /api/billing orders to RabbitMQ" \
       org.opencontainers.image.authors="clecart"
 
+# apk upgrade: take the security fixes released after the alpine:3.23 base image
+# (the ECR scan flagged zlib 1.3.2-r0, CVE-2026-85091, fixed in 1.3.2-r1).
 # tini reaps zombies and forwards signals to node for a clean shutdown.
 # The log directory is created here so the named volume inherits app:app ownership on first mount.
-RUN apk add --no-cache nodejs tini \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache nodejs tini \
     && addgroup -S -g 1001 app \
     && adduser -S -D -H -u 1001 -G app -h /app -s /sbin/nologin app \
     && mkdir -p /var/logs/api-gateway \
