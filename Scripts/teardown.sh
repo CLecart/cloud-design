@@ -41,8 +41,10 @@ fi
 
 echo "== 2. EBS volumes of the claims"
 for _ in $(seq 1 30); do
-  [[ "$(pvc_volume_count)" -eq 0 ]] && break
-  echo "waiting for $(pvc_volume_count) volume(s) to be deleted by the EBS CSI driver..."
+  # Counted once per round: a second call could already see fewer volumes.
+  count="$(pvc_volume_count)"
+  [[ "$count" -eq 0 ]] && break
+  echo "waiting for $count volume(s) to be deleted by the EBS CSI driver..."
   sleep 10
 done
 
