@@ -33,6 +33,16 @@ output "api_url" {
   value       = aws_apigatewayv2_api.this.api_endpoint
 }
 
+output "container_log_group" {
+  description = "CloudWatch log group of the six services (Fluent Bit)."
+  value       = aws_cloudwatch_log_group.containers.name
+}
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard of API Gateway and of the internal load balancer."
+  value       = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards/dashboard/${aws_cloudwatch_dashboard.platform.dashboard_name}"
+}
+
 output "alb_target_group_arn" {
   description = "Target group of the worker nodes (aws elbv2 describe-target-health)."
   value       = aws_lb_target_group.api_gateway.arn

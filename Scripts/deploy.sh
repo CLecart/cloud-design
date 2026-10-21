@@ -3,10 +3,12 @@
 #
 #   1. add the cluster to ~/.kube/config (context "cloud-design")
 #   2. check that the six images exist in ECR with the wanted tag
-#   3. generate the missing Secrets (Scripts/generate-secrets.sh) and apply them
-#   4. apply Manifests/ through a kustomize overlay that points every container
+#   3. install the monitoring (kube-prometheus-stack) and logging (Fluent Bit)
+#      Helm charts, before the application so its first logs are shipped too
+#   4. generate the missing Secrets (Scripts/generate-secrets.sh) and apply them
+#   5. apply Manifests/ through a kustomize overlay that points every container
 #      to <registry>/cloud-design/<image>:<tag>
-#   5. wait until every workload is ready
+#   6. wait until every workload is ready
 #
 # Prerequisites: terraform/platform applied, images pushed (Scripts/push-images.sh).
 #
@@ -23,13 +25,16 @@ PROJECT="cloud-design"
 NAMESPACE="cloud-design"
 IMAGES=(api-gateway inventory-app inventory-database billing-app billing-database rabbitmq-server)
 OVERLAY_DIR="$ROOT_DIR/.deploy"
+# Chart versions pinned so every session installs exactly the same thing.
+KUBE_PROMETHEUS_STACK_VERSION="92.11.0"
+FLUENT_BIT_VERSION="0.58.3"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   sed -n '2,/^set -euo/p' "$0" | sed '$d' | cut -c3-
   exit 0
 fi
 
-for tool in aws kubectl terraform git; do
+for tool in aws kubectl terraform git helm; do
   command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool is not installed" >&2; exit 1; }
 done
 
@@ -50,6 +55,18 @@ for image in "${IMAGES[@]}"; do
     --image-ids imageTag="$tag" --query 'imageDetails[0].imageTags' --output text >/dev/null 2>&1 ||
     { echo "error: $PROJECT/$image:$tag is not in ECR, run Scripts/push-images.sh first" >&2; exit 1; }
 done
+
+echo "== monitoring: Prometheus + Grafana"
+helm upgrade --install monitoring kube-prometheus-stack \
+  --repo https://prometheus-community.github.io/helm-charts --version "$KUBE_PROMETHEUS_STACK_VERSION" \
+  --namespace monitoring --create-namespace \
+  --values "$ROOT_DIR/Manifests/helm/kube-prometheus-stack.yaml" --wait --timeout 10m
+
+echo "== logging: Fluent Bit -> CloudWatch Logs"
+helm upgrade --install fluent-bit fluent-bit \
+  --repo https://fluent.github.io/helm-charts --version "$FLUENT_BIT_VERSION" \
+  --namespace logging --create-namespace \
+  --values "$ROOT_DIR/Manifests/helm/fluent-bit.yaml" --wait --timeout 5m
 
 echo "== secrets"
 "$ROOT_DIR/Scripts/generate-secrets.sh"
@@ -83,4 +100,9 @@ done
 echo
 kubectl -n "$NAMESPACE" get pods -o wide
 echo
-echo "deployed tag $tag; internal load balancer: http://$(terraform -chdir="$ROOT_DIR/terraform/platform" output -raw alb_dns_name)"
+tf_platform() { terraform -chdir="$ROOT_DIR/terraform/platform" output -raw "$1"; }
+echo "deployed tag $tag"
+echo "  public API:   $(tf_platform api_url)  (token: Scripts/api-token.sh)"
+echo "  Grafana:      Scripts/grafana.sh"
+echo "  logs:         CloudWatch log group $(tf_platform container_log_group)"
+echo "  dashboard:    $(tf_platform dashboard_url)"
