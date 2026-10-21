@@ -159,6 +159,7 @@ flowchart TB
 | Exigence | Réalisation | Détails |
 |---|---|---|
 | Terraform pour toute l'infrastructure | 2 piles : `persistent` (ECR, Cognito) et `platform` (réseau, EKS, ALB, API Gateway, CloudWatch, IAM) | [§4](#4-installation-et-démarrage), [§6](#6-architecture-détaillée) |
+| Stockage (« AWS S3 ou service similaire ») | Volumes **EBS** gp3 chiffrés pour les bases et RabbitMQ (pilote EBS CSI) ; registres **ECR** pour les images (Terraform) | [§6.4](#64-stockage), [§4.1](#41-partie-persistante-une-seule-fois) |
 | Conteneurisation optimisée | Images Alpine multi-étapes, 23 à 67 Mo, non-root, `tini`, HEALTHCHECK | [§6.5](#65-images-et-conteneurs) |
 | Orchestration ECS ou EKS | EKS ; manifests Kubernetes via kustomize | [§6.2](#62-cluster-eks-et-machines) |
 | Load balancing | API Gateway → ALB interne → NodePort → kube-proxy → pods | [§6.3](#63-entrée-publique--api-gateway-cognito-et-load-balancer-interne) |
@@ -441,6 +442,11 @@ curl -s -X POST "$URL/api/billing/" -H "Authorization: Bearer $TOKEN" \
 - **Disponibilité** : 2 machines dans 2 zones ; les services sans état sont répartis
   (`topologySpreadConstraints`) ; chaque service a des sondes de santé ; api-gateway et
   billing-app se reconnectent seuls à RabbitMQ (observé à chaque démarrage).
+- **Limites connues** : les bases et RabbitMQ tournent en une seule copie, sur un volume EBS
+  lié à une zone ; si cette zone tombe, ils attendent son retour (la file RabbitMQ garde les
+  commandes, elles sont traitées ensuite). La sortie internet dépend de la zone de la NAT.
+  En production : RDS Multi-AZ, Amazon MQ ou un cluster RabbitMQ, une NAT par zone
+  ([§11](#11-choix-techniques-et-alternatives)).
 
 ### 6.3 Entrée publique : API Gateway, Cognito et load balancer interne
 
@@ -568,6 +574,14 @@ faille** :
 aws ecr describe-image-scan-findings --repository-name cloud-design/api-gateway \
   --image-id imageTag=b2cd845 --query '[imageScanStatus.status, length(imageScanFindings.findings)]'
 # ["COMPLETE", 0]
+```
+
+Pour rescanner une image déjà envoyée (nouvelles failles publiées depuis), le scan basique
+peut être relancé à la demande, une fois par jour et par image :
+
+```bash
+aws ecr start-image-scan --repository-name cloud-design/api-gateway --image-id imageTag=b2cd845
+aws ecr wait image-scan-complete --repository-name cloud-design/api-gateway --image-id imageTag=b2cd845
 ```
 
 Amazon Inspector (scan avancé et continu) est réservé au plan payant d'AWS.
@@ -743,6 +757,7 @@ aws ecr describe-image-scan-findings --repository-name cloud-design/inventory-ap
 | **EKS** plutôt qu'ECS | Réutilise les manifests d'orchestrator et les compétences Kubernetes ; le sujet le suggère | ECS Fargate : environ 0,20 $/h, pas de plan de contrôle à payer, mais toute la configuration à réécrire |
 | Bases **PostgreSQL en conteneurs** (StatefulSets + EBS) | Fidèle au schéma du sujet, aucun coût en plus | RDS ou Aurora Serverless : sauvegardes, haute disponibilité et mises à jour gérées, plus coûteux |
 | **Une passerelle NAT** | 0,05 $/h économisés par zone | Une NAT par zone pour la haute disponibilité de la sortie internet |
+| Machines **à la demande** | Pas d'interruption pendant les démonstrations ; séances courtes, donc pas d'engagement possible | Instances Spot (moins chères mais reprises par AWS avec 2 minutes de préavis), Savings Plans pour un usage permanent |
 | **Adresse HTTPS par défaut** d'API Gateway | Pas de nom de domaine | Domaine + certificat ACM + domaine personnalisé ; HTTPS jusqu'à l'ALB |
 | **ALB interne créé par Terraform**, NodePort | `terraform destroy` le supprime ; pas de contrôleur à installer | AWS Load Balancer Controller (cible les pods directement), mais ses load balancers survivent à la destruction du cluster |
 | **EKS Pod Identity** | Plus simple qu'IRSA, pas d'annotation, rôles limités par compte de service | IRSA (fournisseur OIDC) |
