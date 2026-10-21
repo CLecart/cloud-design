@@ -206,6 +206,18 @@ else
   exit 1
 fi
 
+if [[ -n "$API_TOKEN" ]]; then
+  section "1b. Authentication: /api/* refused without a valid token"
+  valid_token=$API_TOKEN
+  API_TOKEN=""
+  request GET /api/movies/
+  expect_status 401 "GET /api/movies/ without token"
+  API_TOKEN="not-a-valid-token"
+  request GET /api/movies/
+  expect_status 401 "GET /api/movies/ with a forged token"
+  API_TOKEN=$valid_token
+fi
+
 section "2. Inventory: POST /api/movies/ then GET /api/movies/"
 request POST /api/movies/ '{"title":"A new movie","description":"Very short description"}'
 expect_status 201 'POST /api/movies/ {"title":"A new movie","description":"Very short description"}'

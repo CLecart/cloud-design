@@ -20,12 +20,12 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_http" {
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTP from the VPC (API Gateway VPC link)"
-  ip_protocol       = "tcp"
-  from_port         = 80
-  to_port           = 80
-  cidr_ipv4         = module.vpc.vpc_cidr_block
+  security_group_id            = aws_security_group.alb.id
+  description                  = "HTTP from the API Gateway VPC link only"
+  ip_protocol                  = "tcp"
+  from_port                    = 80
+  to_port                      = 80
+  referenced_security_group_id = aws_security_group.vpc_link.id
 }
 
 # Terraform removes the default allow-all egress rule of a new security group:

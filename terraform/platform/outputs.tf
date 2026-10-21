@@ -28,6 +28,11 @@ output "alb_dns_name" {
   value       = aws_lb.api.dns_name
 }
 
+output "api_url" {
+  description = "Public HTTPS URL of the application (API Gateway)."
+  value       = aws_apigatewayv2_api.this.api_endpoint
+}
+
 output "alb_target_group_arn" {
   description = "Target group of the worker nodes (aws elbv2 describe-target-health)."
   value       = aws_lb_target_group.api_gateway.arn
