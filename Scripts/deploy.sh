@@ -14,7 +14,8 @@
 #
 # Environment:
 #   AWS_REGION  Region of the cluster and the registry (default: aws configure get region, else eu-west-3)
-#   IMAGE_TAG   tag to deploy (default: short Git commit, the tag push-images.sh uses)
+#   IMAGE_TAG   tag to deploy (default: last Git commit that changed Dockerfiles/,
+#               the tag push-images.sh uses)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,7 +37,7 @@ region="${AWS_REGION:-$(aws configure get region || true)}"
 region="${region:-eu-west-3}"
 account="$(aws sts get-caller-identity --query Account --output text)"
 registry="$account.dkr.ecr.$region.amazonaws.com"
-tag="${IMAGE_TAG:-$(git -C "$ROOT_DIR" rev-parse --short HEAD)}"
+tag="${IMAGE_TAG:-$(git -C "$ROOT_DIR" log -1 --format=%h -- Dockerfiles)}"
 cluster="$(terraform -chdir="$ROOT_DIR/terraform/platform" output -raw cluster_name)"
 
 echo "== cluster $cluster ($region)"

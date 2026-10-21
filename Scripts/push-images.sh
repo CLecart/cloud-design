@@ -13,8 +13,8 @@
 #
 # Environment:
 #   AWS_REGION  Region of the repositories (default: aws configure get region, else eu-west-3)
-#   IMAGE_TAG   tag pushed and deployed (default: short Git commit, suffixed -dirty
-#               when the working tree has uncommitted changes)
+#   IMAGE_TAG   tag pushed and deployed (default: last Git commit that changed
+#               Dockerfiles/, suffixed -dirty when Dockerfiles/ has uncommitted changes)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -55,7 +55,8 @@ account="$(aws sts get-caller-identity --query Account --output text)"
 registry="$account.dkr.ecr.$region.amazonaws.com"
 
 if [[ -z "${IMAGE_TAG:-}" ]]; then
-  IMAGE_TAG="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+  # The tag only moves when the images change, not at every commit of the repository.
+  IMAGE_TAG="$(git -C "$ROOT_DIR" log -1 --format=%h -- Dockerfiles)"
   [[ -z "$(git -C "$ROOT_DIR" status --porcelain -- Dockerfiles)" ]] || IMAGE_TAG="$IMAGE_TAG-dirty"
 fi
 
