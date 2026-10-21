@@ -1,0 +1,8 @@
+# Namespace of the whole application: deleting it removes every workload and
+# every volume claim at once (Scripts/teardown.sh).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloud-design
+  labels:
+    app.kubernetes.io/part-of: cloud-design

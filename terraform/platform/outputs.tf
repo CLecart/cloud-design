@@ -22,3 +22,13 @@ output "private_subnet_ids" {
   description = "Private subnets (nodes, pods, internal load balancers)."
   value       = module.vpc.private_subnets
 }
+
+output "alb_dns_name" {
+  description = "Internal DNS name of the api-gateway load balancer (resolvable inside the VPC only)."
+  value       = aws_lb.api.dns_name
+}
+
+output "alb_target_group_arn" {
+  description = "Target group of the worker nodes (aws elbv2 describe-target-health)."
+  value       = aws_lb_target_group.api_gateway.arn
+}

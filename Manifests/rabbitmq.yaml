@@ -13,7 +13,7 @@ metadata:
   name: rabbitmq-config
   labels:
     app: rabbitmq
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 data:
   memory.conf: |
     # RabbitMQ sizes its memory alarm (60 %) from the RAM of the node, not from
@@ -28,7 +28,7 @@ metadata:
   name: rabbitmq
   labels:
     app: rabbitmq
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
   clusterIP: None
   selector:
@@ -44,7 +44,7 @@ metadata:
   name: rabbitmq
   labels:
     app: rabbitmq
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
   serviceName: rabbitmq
   replicas: 1
@@ -55,21 +55,24 @@ spec:
     metadata:
       labels:
         app: rabbitmq
-        app.kubernetes.io/part-of: orchestrator
+        app.kubernetes.io/part-of: cloud-design
     spec:
       # None of the containers calls the Kubernetes API.
       automountServiceAccountToken: false
-      # The image runs as "rabbitmq" (uid 100, gid 101), owner of the NFS directory.
+      # The image runs as "rabbitmq" (uid 100, gid 101); fsGroup makes the new EBS
+      # volume (owned by root) writable by the rabbitmq group.
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
         runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 60
       containers:
         - name: rabbitmq
-          image: clecart/rabbitmq-server:1.0.0
+          image: rabbitmq-server
           ports:
             - name: amqp
               containerPort: 5672
@@ -144,14 +147,11 @@ spec:
         name: data
         labels:
           app: rabbitmq
-          app.kubernetes.io/part-of: orchestrator
+          app.kubernetes.io/part-of: cloud-design
       spec:
-        storageClassName: nfs
+        storageClassName: gp3-encrypted
         accessModes:
           - ReadWriteOnce
-        selector:
-          matchLabels:
-            app: rabbitmq
         resources:
           requests:
             storage: 1Gi

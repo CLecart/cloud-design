@@ -7,24 +7,25 @@
 # between 1 and 3 replicas on CPU usage. It never talks to billing-app
 # directly: billing orders are accepted even while billing-app is stopped.
 
-# LoadBalancer Service: K3s ServiceLB opens port 3000 on every node, so the
-# gateway answers on http://192.168.56.110:3000 and http://192.168.56.111:3000,
-# and balances the requests across the gateway replicas.
+# NodePort Service: every node listens on 30080 and kube-proxy balances the
+# requests across the gateway replicas. The internal Application Load Balancer
+# of terraform/platform/alb.tf targets that port on all the worker nodes.
 apiVersion: v1
 kind: Service
 metadata:
   name: api-gateway
   labels:
     app: api-gateway
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app: api-gateway
   ports:
     - name: http
       port: 3000
       targetPort: http
+      nodePort: 30080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -32,7 +33,7 @@ metadata:
   name: api-gateway
   labels:
     app: api-gateway
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
   # No "replicas" field: the HorizontalPodAutoscaler below owns the replica
   # count, and re-applying this file must not reset it.
@@ -43,7 +44,7 @@ spec:
     metadata:
       labels:
         app: api-gateway
-        app.kubernetes.io/part-of: orchestrator
+        app.kubernetes.io/part-of: cloud-design
     spec:
       # None of the containers calls the Kubernetes API.
       automountServiceAccountToken: false
@@ -63,7 +64,7 @@ spec:
               app: api-gateway
       containers:
         - name: api-gateway
-          image: clecart/api-gateway:1.0.0
+          image: api-gateway
           ports:
             - name: http
               containerPort: 3000
@@ -130,7 +131,7 @@ metadata:
   name: api-gateway
   labels:
     app: api-gateway
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
   scaleTargetRef:
     apiVersion: apps/v1

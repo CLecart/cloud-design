@@ -1,7 +1,8 @@
 # inventory-db: PostgreSQL 17 server holding the "movies" database of inventory-app.
 #
 # StatefulSet (and not Deployment): the pod keeps a stable name (inventory-db-0)
-# and its own persistent volume, which follows it wherever it is rescheduled.
+# and its own persistent volume. EBS volumes are zonal: the pod is always
+# rescheduled in the Availability Zone of its volume.
 # Reachable inside the cluster at inventory-db:5432.
 
 # Headless Service (clusterIP: None): the DNS name resolves straight to the pod
@@ -12,7 +13,7 @@ metadata:
   name: inventory-db
   labels:
     app: inventory-db
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
   clusterIP: None
   selector:
@@ -28,7 +29,7 @@ metadata:
   name: inventory-db
   labels:
     app: inventory-db
-    app.kubernetes.io/part-of: orchestrator
+    app.kubernetes.io/part-of: cloud-design
 spec:
   serviceName: inventory-db
   replicas: 1
@@ -39,26 +40,33 @@ spec:
     metadata:
       labels:
         app: inventory-db
-        app.kubernetes.io/part-of: orchestrator
+        app.kubernetes.io/part-of: cloud-design
     spec:
       # None of the containers calls the Kubernetes API.
       automountServiceAccountToken: false
       # The image runs as "postgres" (uid 70). The numeric ids let Kubernetes
-      # enforce runAsNonRoot and match the owner of the NFS directory.
+      # enforce runAsNonRoot; fsGroup makes the new EBS volume (owned by root)
+      # writable by the postgres group.
       securityContext:
         runAsNonRoot: true
         runAsUser: 70
         runAsGroup: 70
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 30
       containers:
         - name: inventory-db
-          image: clecart/inventory-database:1.0.0
+          image: inventory-database
           ports:
             - name: postgres
               containerPort: 5432
           env:
+            # Data in a sub-directory: the root of an EBS volume holds lost+found,
+            # and initdb refuses a directory that is not empty.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_DB
               value: movies
             - name: POSTGRES_USER
@@ -123,21 +131,18 @@ spec:
           emptyDir: {}
         - name: tmp
           emptyDir: {}
-  # One claim per replica (data-inventory-db-0), bound to the inventory-db-pv
-  # PersistentVolume of Manifests/storage.yaml through its "app" label.
+  # One claim per replica (data-inventory-db-0): the EBS CSI driver creates an encrypted
+  # gp3 volume (StorageClass of Manifests/storage.yaml) in the zone of the pod.
   volumeClaimTemplates:
     - metadata:
         name: data
         labels:
           app: inventory-db
-          app.kubernetes.io/part-of: orchestrator
+          app.kubernetes.io/part-of: cloud-design
       spec:
-        storageClassName: nfs
+        storageClassName: gp3-encrypted
         accessModes:
           - ReadWriteOnce
-        selector:
-          matchLabels:
-            app: inventory-db
         resources:
           requests:
             storage: 1Gi

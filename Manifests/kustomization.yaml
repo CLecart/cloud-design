@@ -1,0 +1,20 @@
+# Base of the application, applied by Scripts/deploy.sh.
+#
+# The containers reference their image by its bare name (image: api-gateway);
+# deploy.sh adds an "images" override with the ECR registry and the Git tag
+# pushed by Scripts/push-images.sh. The Secrets of Manifests/secrets/ are
+# generated locally and applied separately: they never enter Git.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cloud-design
+
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - inventory-database.yaml
+  - billing-database.yaml
+  - rabbitmq.yaml
+  - inventory-app.yaml
+  - billing-app.yaml
+  - api-gateway.yaml
