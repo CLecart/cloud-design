@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end audit scenario against the stack deployed on the K3s cluster:
+# End-to-end audit scenario against the stack deployed on the EKS cluster:
 #
 #   1. wait for the gateway GET /health
 #   2. POST /api/movies/ -> 201, then GET /api/movies/ -> 200 contains the new title
@@ -7,12 +7,15 @@
 #   4. scale billing-app to 0, POST /api/billing/ -> 200, the message waits in RabbitMQ
 #   5. scale billing-app back to 1 -> the queue is drained and the order is stored
 #
-# Usage: Scripts/test-api.sh [--skip-stop]      (or ./orchestrator.sh test)
+# Usage: Scripts/test-api.sh [--skip-stop]
 #   --skip-stop   run steps 1-3 only (billing-app is never stopped)
 #
 # Environment:
-#   GATEWAY_URL     default http://192.168.56.110:3000
-#   KUBE_CONTEXT    kubectl context of the cluster (default orchestrator)
+#   GATEWAY_URL     base URL of the API (default: a temporary kubectl port-forward
+#                   to the api-gateway Service, the load balancer being internal)
+#   API_TOKEN       optional token sent as "Authorization: Bearer <token>"
+#   KUBE_CONTEXT    kubectl context of the cluster (default cloud-design)
+#   NAMESPACE       namespace of the application (default cloud-design)
 #   HEALTH_TIMEOUT  seconds to wait for /health (default 120)
 #   WAIT_TIMEOUT    seconds to wait for the database/queue to reflect a request (default 60)
 set -euo pipefail
@@ -36,13 +39,15 @@ for arg in "$@"; do
   esac
 done
 
-GATEWAY_URL="${GATEWAY_URL:-http://192.168.56.110:3000}"
-KUBE_CONTEXT="${KUBE_CONTEXT:-orchestrator}"
+GATEWAY_URL="${GATEWAY_URL:-}"
+API_TOKEN="${API_TOKEN:-}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-cloud-design}"
+NAMESPACE="${NAMESPACE:-cloud-design}"
 RABBITMQ_QUEUE=billing_queue
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-60}"
 
-kube() { kubectl --context "$KUBE_CONTEXT" "$@"; }
+kube() { kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" "$@"; }
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   GREEN=$'\033[32m' RED=$'\033[31m' YELLOW=$'\033[33m' BOLD=$'\033[1m' RESET=$'\033[0m'
@@ -97,6 +102,9 @@ request() {
   local args=(--silent --show-error --max-time 15 --request "$method" --write-out $'\n%{http_code}')
   if [[ -n "$body" ]]; then
     args+=(--header 'Content-Type: application/json' --data "$body")
+  fi
+  if [[ -n "$API_TOKEN" ]]; then
+    args+=(--header "Authorization: Bearer $API_TOKEN")
   fi
   response=$(curl "${args[@]}" "$GATEWAY_URL$path" 2>&1) || true
   HTTP_STATUS=${response##*$'\n'}
@@ -161,18 +169,31 @@ billing_app_gone() {
   [[ -z "$(kube get pods -l app=billing-app -o name 2>/dev/null)" ]]
 }
 
-# Never leave billing-app scaled to 0 when the script is interrupted half-way.
+# Never leave billing-app scaled to 0 when the script is interrupted half-way,
+# and stop the port-forward this script started.
 billing_stopped=false
-restore_billing_app() {
+port_forward_pid=""
+cleanup() {
   if [[ "$billing_stopped" == true ]]; then
     echo "Scaling billing-app back to 1 (left stopped by an aborted run)" >&2
     kube scale statefulset billing-app --replicas=1 || true
   fi
+  if [[ -n "$port_forward_pid" ]]; then
+    kill "$port_forward_pid" 2>/dev/null || true
+  fi
 }
-trap restore_billing_app EXIT
+trap cleanup EXIT
+
+if [[ -z "$GATEWAY_URL" ]]; then
+  # kubectl itself, not the kube function: a backgrounded function runs in a
+  # subshell, and $! would then name the subshell instead of kubectl.
+  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" port-forward service/api-gateway 13000:3000 >/dev/null 2>&1 &
+  port_forward_pid=$!
+  GATEWAY_URL=http://127.0.0.1:13000
+fi
 
 # --- Scenario ----------------------------------------------------------------
-echo "${BOLD}orchestrator end-to-end test${RESET}"
+echo "${BOLD}cloud-design end-to-end test${RESET}"
 echo "  gateway: $GATEWAY_URL   kubectl context: $KUBE_CONTEXT"
 
 section "1. API gateway health"
