@@ -25,7 +25,12 @@ module "eks" {
   cloudwatch_log_group_retention_in_days = 1
 
   addons = {
-    vpc-cni                = { before_compute = true }
+    # enableNetworkPolicy: the VPC CNI enforces the NetworkPolicies of
+    # Manifests/network-policies.yaml (eBPF agent in the aws-node DaemonSet).
+    vpc-cni = {
+      before_compute       = true
+      configuration_values = jsonencode({ enableNetworkPolicy = "true" })
+    }
     eks-pod-identity-agent = { before_compute = true }
     kube-proxy             = {}
     coredns                = {}

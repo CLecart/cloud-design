@@ -18,3 +18,4 @@ resources:
   - inventory-app.yaml
   - billing-app.yaml
   - api-gateway.yaml
+  - network-policies.yaml
