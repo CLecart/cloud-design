@@ -3,8 +3,8 @@
 #
 #   1. add the cluster to ~/.kube/config (context "cloud-design")
 #   2. check that the six images exist in ECR with the wanted tag
-#   3. install the monitoring (kube-prometheus-stack) and logging (Fluent Bit)
-#      Helm charts, before the application so its first logs are shipped too
+#   3. install the Helm charts: cluster autoscaler, monitoring (kube-prometheus-stack)
+#      and logging (Fluent Bit), before the application so its first logs are shipped too
 #   4. generate the missing Secrets (Scripts/generate-secrets.sh) and apply them
 #   5. apply Manifests/ through a kustomize overlay that points every container
 #      to <registry>/cloud-design/<image>:<tag>
@@ -28,6 +28,7 @@ OVERLAY_DIR="$ROOT_DIR/.deploy"
 # Chart versions pinned so every session installs exactly the same thing.
 KUBE_PROMETHEUS_STACK_VERSION="92.11.0"
 FLUENT_BIT_VERSION="0.58.3"
+CLUSTER_AUTOSCALER_VERSION="9.59.0"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   sed -n '2,/^set -euo/p' "$0" | sed '$d' | cut -c3-
@@ -55,6 +56,12 @@ for image in "${IMAGES[@]}"; do
     --image-ids imageTag="$tag" --query 'imageDetails[0].imageTags' --output text >/dev/null 2>&1 ||
     { echo "error: $PROJECT/$image:$tag is not in ECR, run Scripts/push-images.sh first" >&2; exit 1; }
 done
+
+echo "== node autoscaling: Cluster Autoscaler"
+helm upgrade --install cluster-autoscaler cluster-autoscaler \
+  --repo https://kubernetes.github.io/autoscaler --version "$CLUSTER_AUTOSCALER_VERSION" \
+  --namespace kube-system \
+  --values "$ROOT_DIR/Manifests/helm/cluster-autoscaler.yaml" --wait --timeout 5m
 
 echo "== monitoring: Prometheus + Grafana"
 helm upgrade --install monitoring kube-prometheus-stack \

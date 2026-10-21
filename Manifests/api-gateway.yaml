@@ -4,7 +4,7 @@
 #   POST /api/billing  -> published into the RabbitMQ "billing_queue"
 #
 # Stateless, so it runs as a Deployment scaled by a HorizontalPodAutoscaler
-# between 1 and 3 replicas on CPU usage. It never talks to billing-app
+# between 1 and 5 replicas on CPU usage. It never talks to billing-app
 # directly: billing orders are accepted even while billing-app is stopped.
 
 # NodePort Service: every node listens on 30080 and kube-proxy balances the
@@ -138,7 +138,7 @@ spec:
     kind: Deployment
     name: api-gateway
   minReplicas: 1
-  maxReplicas: 3
+  maxReplicas: 5
   metrics:
     # Scale out when the average CPU usage exceeds 60 % of the request (100m).
     - type: Resource

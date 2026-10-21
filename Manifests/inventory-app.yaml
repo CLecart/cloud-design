@@ -1,7 +1,7 @@
 # inventory-app: Node.js REST API for movies (CRUD on the inventory-db database).
 #
 # Stateless, so it runs as a Deployment scaled by a HorizontalPodAutoscaler
-# between 1 and 3 replicas on CPU usage. Reachable inside the cluster at
+# between 1 and 5 replicas on CPU usage. Reachable inside the cluster at
 # inventory-app:8080, the Service load-balancing across the replicas.
 
 apiVersion: v1
@@ -129,7 +129,7 @@ spec:
     kind: Deployment
     name: inventory-app
   minReplicas: 1
-  maxReplicas: 3
+  maxReplicas: 5
   metrics:
     # Scale out when the average CPU usage exceeds 60 % of the request (100m).
     - type: Resource
